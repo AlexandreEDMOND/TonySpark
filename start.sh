@@ -14,5 +14,5 @@ if [ ! -d node_modules ]; then
   npm install
 fi
 
-echo "🚀 Démarrage de TonySpark sur http://localhost:5173"
+echo "🚀 Démarrage de TonySpark sur http://localhost:5273"
 exec npm run dev -- "$@"

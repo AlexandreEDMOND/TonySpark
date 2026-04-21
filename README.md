@@ -14,7 +14,7 @@ Tout tourne **localement dans le navigateur** — aucune image n'est envoyée su
 ./start.sh
 ```
 
-Le script installe les dépendances npm si besoin puis lance le serveur de dev Vite sur <http://localhost:5173>.
+Le script installe les dépendances npm si besoin puis lance le serveur de dev Vite sur <http://localhost:5273>.
 
 La première ouverture te demandera l'autorisation d'accéder à la caméra. Une fois accordée, la liste des webcams disponibles apparaît dans la barre du haut.
 
