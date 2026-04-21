@@ -121,3 +121,128 @@
 .camera-selector select {
   max-width: 320px;
 }
+
+.calibrate-btn {
+  background: #1f2a44;
+  color: #e7ecf3;
+  border: 1px solid #2d3a57;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.calibrate-btn:hover:not(:disabled) { background: #263356; }
+.calibrate-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.calibrate-btn.ghost {
+  background: transparent;
+  border-color: #2d3a57;
+  color: #9aa4b8;
+}
+
+.gaze-target {
+  position: absolute;
+  width: 36px;
+  height: 36px;
+  margin-left: -18px;
+  margin-top: -18px;
+  border: 2px solid rgba(255, 120, 180, 1);
+  border-radius: 50%;
+  background: rgba(255, 120, 180, 0.22);
+  pointer-events: none;
+  z-index: 2;
+  box-shadow: 0 0 18px rgba(255, 120, 180, 0.35);
+}
+
+.gaze-target::before,
+.gaze-target::after {
+  content: '';
+  position: absolute;
+  background: rgba(255, 120, 180, 1);
+}
+.gaze-target::before {
+  left: 50%; top: 4px; bottom: 4px; width: 2px; margin-left: -1px;
+}
+.gaze-target::after {
+  top: 50%; left: 4px; right: 4px; height: 2px; margin-top: -1px;
+}
+
+.calibration-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 10, 15, 0.88);
+  z-index: 4;
+}
+
+.calibration-hud {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  background: #141925;
+  border: 1px solid #232b3d;
+  border-radius: 10px;
+  font-size: 13px;
+  color: #cfd6e4;
+}
+
+.calibration-hud button {
+  background: transparent;
+  color: #9aa4b8;
+  border: 1px solid #2d3a57;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.calibration-target {
+  position: absolute;
+  width: 72px;
+  height: 72px;
+  margin-left: -36px;
+  margin-top: -36px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  /* Progress ring via conic-gradient, driven by --progress (0..1). */
+  background:
+    conic-gradient(#ffdc78 calc(var(--progress, 0) * 360deg), rgba(255, 220, 120, 0.15) 0);
+  box-shadow: 0 0 18px rgba(255, 220, 120, 0.5);
+  transition: background-color 120ms ease;
+}
+
+.calibration-target::before {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+  background: #ffdc78;
+  box-shadow: 0 0 14px rgba(255, 220, 120, 0.8);
+}
+
+.calibration-target.capture {
+  background:
+    conic-gradient(#ff78b4 calc(var(--progress, 0) * 360deg), rgba(255, 120, 180, 0.15) 0);
+  box-shadow: 0 0 22px rgba(255, 120, 180, 0.6);
+}
+
+.calibration-target.capture::before {
+  background: #ff78b4;
+  box-shadow: 0 0 18px rgba(255, 120, 180, 0.9);
+  inset: 22px; /* smaller inner dot during capture */
+}
+
+.calibration-countdown {
+  position: relative;
+  z-index: 1;
+  font-size: 14px;
+  font-weight: 600;
+  color: #0d1017;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import CameraSelector from './components/CameraSelector.jsx'
 import TrackingView from './components/TrackingView.jsx'
+import CalibrationOverlay from './components/CalibrationOverlay.jsx'
 import { createTrackers } from './lib/tracker.js'
 import './App.css'
 
@@ -13,7 +14,10 @@ export default function App() {
   const [stats, setStats] = useState({ hands: 0, faceDetected: false, fps: 0 })
   const [showHands, setShowHands] = useState(true)
   const [showGaze, setShowGaze] = useState(true)
+  const [calibration, setCalibration] = useState(null)
+  const [calibrating, setCalibrating] = useState(false)
   const trackersRef = useRef(null)
+  const latestGazeRef = useRef(null)
 
   const refreshDevices = useCallback(async () => {
     const all = await navigator.mediaDevices.enumerateDevices()
@@ -119,6 +123,24 @@ export default function App() {
             <input type="checkbox" checked={showGaze} onChange={(e) => setShowGaze(e.target.checked)} />
             Regard
           </label>
+          <button
+            type="button"
+            className="calibrate-btn"
+            onClick={() => setCalibrating(true)}
+            disabled={!trackersReady || !stream || calibrating}
+          >
+            {calibration ? 'Recalibrer' : 'Calibrer'}
+          </button>
+          {calibration && (
+            <button
+              type="button"
+              className="calibrate-btn ghost"
+              onClick={() => setCalibration(null)}
+              title="Effacer la calibration"
+            >
+              Reset
+            </button>
+          )}
         </div>
         <div className="stats">
           <span>Mains: <b>{stats.hands}</b></span>
@@ -151,7 +173,19 @@ export default function App() {
             trackers={trackersRef.current}
             showHands={showHands}
             showGaze={showGaze}
+            calibration={calibration}
+            latestGazeRef={latestGazeRef}
             onStats={setStats}
+          />
+        )}
+        {calibrating && (
+          <CalibrationOverlay
+            latestGazeRef={latestGazeRef}
+            onComplete={(model) => {
+              setCalibration(model)
+              setCalibrating(false)
+            }}
+            onCancel={() => setCalibrating(false)}
           />
         )}
       </main>
