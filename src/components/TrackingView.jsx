@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react'
-import { HAND_CONNECTIONS, estimateGaze } from '../lib/tracker.js'
-import { applyCalibration } from '../lib/calibration.js'
-import { OneEuroFilter2D } from '../lib/oneEuro.js'
+import { HAND_CONNECTIONS } from '../lib/tracker.js'
+import { createHandInteractionState, updateHandInteractions } from '../lib/gestures.js'
 
 const HAND_COLORS = ['#7aa7ff', '#ffb86b'] // hand #1 / hand #2
 
@@ -9,28 +8,26 @@ export default function TrackingView({
   stream,
   trackers,
   showHands,
-  showGaze,
-  calibration,
-  latestGazeRef,
+  showCursor,
+  onInteractions,
   onStats
 }) {
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
-  const targetRef = useRef(null)
   const rafRef = useRef(0)
   const lastTimestampRef = useRef(-1)
   const fpsRef = useRef({ frames: 0, last: performance.now(), value: 0 })
-  const gazeFilterRef = useRef(new OneEuroFilter2D({ minCutoff: 1.2, beta: 0.02, dCutoff: 1.0 }))
 
   // Keep latest props without restarting the render loop.
   const showHandsRef = useRef(showHands)
-  const showGazeRef = useRef(showGaze)
-  const calibrationRef = useRef(calibration)
+  const showCursorRef = useRef(showCursor)
   const onStatsRef = useRef(onStats)
+  const onInteractionsRef = useRef(onInteractions)
+  const interactionsRef = useRef(createHandInteractionState())
   showHandsRef.current = showHands
-  showGazeRef.current = showGaze
-  calibrationRef.current = calibration
+  showCursorRef.current = showCursor
   onStatsRef.current = onStats
+  onInteractionsRef.current = onInteractions
 
   // Bind the MediaStream to the <video>.
   useEffect(() => {
@@ -67,9 +64,7 @@ export default function TrackingView({
       lastTimestampRef.current = ts
 
       let handResult = null
-      let faceResult = null
       try { handResult = trackers.hand.detectForVideo(video, ts) } catch {}
-      try { faceResult = trackers.face.detectForVideo(video, ts) } catch {}
 
       ctx.clearRect(0, 0, canvas.width, canvas.height)
 
@@ -80,38 +75,14 @@ export default function TrackingView({
         })
       }
 
-      let faceDetected = false
-      const target = targetRef.current
-      if (faceResult?.faceLandmarks?.length) {
-        faceDetected = true
-        const lm = faceResult.faceLandmarks[0]
-        const g = estimateGaze(lm)
+      const interactions = updateHandInteractions(interactionsRef.current, hands)
+      const stageInteractions = mapInteractionsToElement(interactions, canvas)
+      onInteractionsRef.current?.(stageInteractions)
 
-        // Expose raw gaze for the calibration overlay.
-        if (latestGazeRef) latestGazeRef.current = { gx: g.gaze.x, gy: g.gaze.y }
-
-        if (showGazeRef.current) {
-          drawIrisMarkers(ctx, g, canvas.width, canvas.height)
-
-          if (calibrationRef.current) {
-            const screen = applyCalibration(calibrationRef.current, g.gaze.x, g.gaze.y)
-            const smoothed = gazeFilterRef.current.filter(screen, ts)
-            if (target) {
-              target.style.display = 'block'
-              target.style.left = `${clamp01(smoothed.x) * 100}%`
-              target.style.top = `${clamp01(smoothed.y) * 100}%`
-            }
-          } else {
-            if (target) target.style.display = 'none'
-            drawUncalibratedGaze(ctx, g, canvas.width, canvas.height, gazeFilterRef.current, ts)
-          }
-        } else {
-          if (target) target.style.display = 'none'
-        }
-      } else {
-        if (latestGazeRef) latestGazeRef.current = null
-        gazeFilterRef.current.reset()
-        if (target) target.style.display = 'none'
+      if (showCursorRef.current) {
+        interactions.forEach((interaction, idx) => {
+          drawVirtualCursor(ctx, interaction, canvas.width, canvas.height, HAND_COLORS[idx % HAND_COLORS.length], idx + 1)
+        })
       }
 
       const f = fpsRef.current
@@ -121,30 +92,122 @@ export default function TrackingView({
         f.value = Math.round((f.frames * 1000) / (now - f.last))
         f.frames = 0
         f.last = now
-        onStatsRef.current?.({ hands: hands.length, faceDetected, fps: f.value })
+        onStatsRef.current?.({
+          hands: hands.length,
+          fps: f.value,
+          cursors: stageInteractions.map((interaction) => (
+            interaction.visible ? {
+              x: interaction.x,
+              y: interaction.y,
+              pinching: interaction.pinching,
+              pinchRatio: interaction.pinchRatio
+            } : null
+          ))
+        })
       }
     }
 
     rafRef.current = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(rafRef.current)
-  }, [trackers, latestGazeRef])
-
-  // Reset the filter when calibration changes so stale state doesn't leak across models.
-  useEffect(() => {
-    gazeFilterRef.current.reset()
-  }, [calibration])
+  }, [trackers])
 
   return (
     <>
       <video ref={videoRef} autoPlay muted playsInline />
       <canvas ref={canvasRef} />
-      <div ref={targetRef} className="gaze-target" style={{ display: 'none' }} />
     </>
   )
 }
 
-function clamp01(v) {
-  return Math.max(0, Math.min(1, v))
+function drawVirtualCursor(ctx, cursor, w, h, color, label) {
+  if (!cursor.visible) return
+
+  // The canvas is mirrored in CSS, so draw the inverse X to display natural screen coordinates.
+  const x = (1 - cursor.x) * w
+  const y = cursor.y * h
+  const outer = cursor.pinching ? 28 : 22
+  const inner = cursor.pinching ? 9 : 5
+
+  ctx.save()
+  ctx.shadowColor = color
+  ctx.shadowBlur = 18
+  ctx.strokeStyle = color
+  ctx.fillStyle = '#ffffff'
+  ctx.lineWidth = 3
+
+  ctx.beginPath()
+  ctx.arc(x, y, outer, 0, Math.PI * 2)
+  ctx.stroke()
+
+  ctx.beginPath()
+  ctx.arc(x, y, inner, 0, Math.PI * 2)
+  ctx.fill()
+
+  if (cursor.pinching) {
+    ctx.fillStyle = color
+    ctx.globalAlpha = 0.18
+    ctx.beginPath()
+    ctx.arc(x, y, outer + 12, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.globalAlpha = 1
+  }
+
+  ctx.shadowBlur = 12
+  ctx.fillStyle = color
+  ctx.font = '700 13px system-ui, sans-serif'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(cursor.pinching ? `GRAB ${label}` : String(label), x, y - 46)
+
+  ctx.shadowBlur = 0
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.72)'
+  ctx.lineWidth = 1.5
+  ctx.beginPath()
+  ctx.moveTo(x - 34, y)
+  ctx.lineTo(x - 14, y)
+  ctx.moveTo(x + 14, y)
+  ctx.lineTo(x + 34, y)
+  ctx.moveTo(x, y - 34)
+  ctx.lineTo(x, y - 14)
+  ctx.moveTo(x, y + 14)
+  ctx.lineTo(x, y + 34)
+  ctx.stroke()
+  ctx.restore()
+}
+
+function mapInteractionsToElement(interactions, element) {
+  const elementWidth = element.clientWidth
+  const elementHeight = element.clientHeight
+  const sourceWidth = element.width
+  const sourceHeight = element.height
+
+  if (!elementWidth || !elementHeight || !sourceWidth || !sourceHeight) return interactions
+
+  const sourceRatio = sourceWidth / sourceHeight
+  const elementRatio = elementWidth / elementHeight
+  let drawnWidth = elementWidth
+  let drawnHeight = elementHeight
+  let offsetX = 0
+  let offsetY = 0
+
+  if (elementRatio > sourceRatio) {
+    drawnWidth = elementHeight * sourceRatio
+    offsetX = (elementWidth - drawnWidth) / 2
+  } else {
+    drawnHeight = elementWidth / sourceRatio
+    offsetY = (elementHeight - drawnHeight) / 2
+  }
+
+  return interactions.map((interaction) => {
+    if (!interaction.visible) return interaction
+    return {
+      ...interaction,
+      videoX: interaction.x,
+      videoY: interaction.y,
+      x: (offsetX + interaction.x * drawnWidth) / elementWidth,
+      y: (offsetY + interaction.y * drawnHeight) / elementHeight
+    }
+  })
 }
 
 function drawHand(ctx, landmarks, w, h, color) {
@@ -177,51 +240,4 @@ function drawHand(ctx, landmarks, w, h, color) {
     ctx.arc(p.x * w, p.y * h, r, 0, Math.PI * 2)
     ctx.stroke()
   }
-}
-
-function drawIrisMarkers(ctx, g, w, h) {
-  ctx.fillStyle = 'rgba(255, 220, 120, 0.95)'
-  for (const iris of [g.leftIris, g.rightIris]) {
-    ctx.beginPath()
-    ctx.arc(iris.x * w, iris.y * h, 5, 0, Math.PI * 2)
-    ctx.fill()
-  }
-}
-
-// Fallback crosshair before calibration: anchor-projected gaze with hardcoded sensitivity.
-function drawUncalibratedGaze(ctx, g, w, h, filter, ts) {
-  const SENS_X = 0.9
-  const SENS_Y = 0.6
-  const target = {
-    x: clamp01(g.anchor.x + g.gaze.x * SENS_X),
-    y: clamp01(g.anchor.y + g.gaze.y * SENS_Y)
-  }
-  const smoothed = filter.filter(target, ts)
-  const sx = smoothed.x * w
-  const sy = smoothed.y * h
-  const ax = g.anchor.x * w
-  const ay = g.anchor.y * h
-
-  ctx.strokeStyle = 'rgba(255, 120, 180, 0.55)'
-  ctx.lineWidth = 2
-  ctx.setLineDash([6, 6])
-  ctx.beginPath()
-  ctx.moveTo(ax, ay)
-  ctx.lineTo(sx, sy)
-  ctx.stroke()
-  ctx.setLineDash([])
-
-  ctx.fillStyle = 'rgba(255, 120, 180, 0.25)'
-  ctx.beginPath()
-  ctx.arc(sx, sy, 22, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.strokeStyle = 'rgba(255, 120, 180, 1)'
-  ctx.lineWidth = 2
-  ctx.beginPath()
-  ctx.arc(sx, sy, 10, 0, Math.PI * 2)
-  ctx.stroke()
-  ctx.beginPath()
-  ctx.moveTo(sx - 14, sy); ctx.lineTo(sx + 14, sy)
-  ctx.moveTo(sx, sy - 14); ctx.lineTo(sx, sy + 14)
-  ctx.stroke()
 }
