@@ -1,60 +1,81 @@
 # TonySpark
 
-Web-app React qui utilise ta webcam pour detecter le squelette de tes mains en temps reel.
+TonySpark est une web-app React qui transforme la webcam en interface de controle gestuel. Elle detecte les mains en temps reel avec MediaPipe, affiche des curseurs virtuels et permet de manipuler des fenetres de test avec un pincement pouce-index.
 
-- **Choisir la caméra** parmi celles branchées sur ta machine.
-- **Détecter le squelette de tes mains** en temps réel (0, 1 ou 2 mains) avec les 21 landmarks MediaPipe.
+## Fonctionnalites
 
-L'image webcam reste **locale dans le navigateur**. Il n'y a pas de backend a lancer pour l'instant.
+- Selection de la camera depuis l'interface.
+- Detection locale de 0, 1 ou 2 mains avec les 21 landmarks MediaPipe.
+- Affichage optionnel du squelette des mains et des curseurs virtuels.
+- Pincement pouce-index pour saisir et deplacer une fenetre.
+- Redimensionnement d'une fenetre avec deux mains pincees sur la meme cible.
+- Inertie au relachement pour donner une sensation de lancer.
+- HUD temps reel avec FPS, nombre de mains et position des curseurs.
 
-## Idee mise de cote
+L'image webcam reste locale dans le navigateur. TonySpark n'a pas de backend a lancer.
 
-Le suivi du regard via un backend Python [GazeFollower](https://github.com/GanchengZhu/GazeFollower) a ete teste, mais il lance une calibration plein ecran via pygame. Sur macOS, cette fenetre prend le focus et rend l'experience instable. L'idee est donc gardee pour plus tard, mais elle est retiree de l'app actuelle.
+## Demo d'usage
+
+1. Autorise l'acces camera au chargement de la page.
+2. Choisis la camera si plusieurs peripheriques sont disponibles.
+3. Place l'index sur une fenetre.
+4. Pince pouce-index pour la saisir, deplace ta main, puis relache.
+5. Pince avec deux mains sur la meme fenetre pour la redimensionner.
 
 ## Architecture
 
-```
-┌──────────────┐
-│  Browser     │
-│  React       │
-│  MediaPipe   │
-└──────────────┘
-       │
-       └──── ouvre la webcam pour detecter les mains
+```text
+Browser
+  React + Vite
+  MediaPipe Tasks Vision
+  Webcam getUserMedia
+        |
+        +-- detection des mains
+        +-- calcul des gestes
+        +-- rendu video/canvas/fenetres
 ```
 
-## Démarrage
+## Demarrage
 
 ```bash
 ./start.sh
 ```
 
-Ou :
+Ou manuellement :
 
 ```bash
 npm install
 npm run dev
 ```
 
-Ouvre <http://localhost:5273>.
+Ouvre ensuite <http://localhost:5273>.
 
-## Comment ça marche
+## Comment ca marche
 
-- `@mediapipe/tasks-vision` charge le modele MediaPipe pour le squelette des mains, execute cote browser.
-- `TrackingView` lit la video webcam, lance `HandLandmarker.detectForVideo`, puis dessine les 21 points et connexions de chaque main sur un canvas.
-- La camera selectionnee est geree depuis l'interface via `CameraSelector`.
+- `@mediapipe/tasks-vision` charge le modele Hand Landmarker en WebAssembly avec delegation GPU.
+- `TrackingView` lit le flux webcam, execute `HandLandmarker.detectForVideo`, dessine les landmarks et produit les interactions normalisees.
+- `src/lib/gestures.js` convertit la distance pouce-index en etat de pincement avec hysteresis.
+- `GestureWindowLayer` affiche les fenetres pilotables et leur etat visuel.
+- `App` gere les captures de fenetres, le redimensionnement a deux mains, le z-index, les limites de scene et l'inertie.
+
+## Stack
+
+- React 18
+- Vite 5
+- MediaPipe Tasks Vision
+
+## Scripts
+
+- `npm run dev` : serveur de developpement Vite
+- `npm run build` : build de production dans `dist/`
+- `npm run preview` : preview du build Vite
 
 ## Limites
 
 - Le navigateur doit avoir l'autorisation d'utiliser la camera.
-- Les modeles MediaPipe sont charges depuis les CDN/configurations definis dans `src/lib/tracker.js`.
-- La detection depend de la lumiere, du cadrage et de la qualite de la webcam.
+- Le chargement initial depend des modeles MediaPipe et du WASM servis par les URLs configurees dans `src/lib/tracker.js`.
+- La detection depend de la lumiere, du cadrage, de la qualite de la webcam et de la visibilite des doigts.
 
-## Stack
+## Idee mise de cote
 
-- **Frontend** : React 18 + Vite, MediaPipe Tasks Vision (WebAssembly + GPU)
-
-## Scripts
-
-- `npm run dev` — serveur de dev frontend (port 5273)
-- `npm run build` — build de prod dans `dist/`
+Le suivi du regard via un backend Python [GazeFollower](https://github.com/GanchengZhu/GazeFollower) a ete teste, mais il lance une calibration plein ecran via pygame. Sur macOS, cette fenetre prend le focus et rend l'experience instable. L'idee est gardee pour plus tard, mais elle est retiree de l'app actuelle.
