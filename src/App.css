@@ -233,7 +233,7 @@
 .gesture-window__body {
   min-height: 0;
   display: grid;
-  align-content: space-between;
+  grid-template-rows: minmax(0, 1fr) auto;
   gap: 12px;
   padding: 14px;
 }
@@ -306,8 +306,84 @@
 }
 
 .gesture-chip.is-pinching {
-  border-color: #ffcf7a;
-  background: rgba(54, 38, 15, 0.72);
+  border-color: #78d8ff;
+  background: rgba(10, 34, 52, 0.76);
+}
+
+.gesture-settings {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: min(320px, calc(100vw - 28px));
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #243049;
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(10, 15, 23, 0.9), rgba(7, 10, 17, 0.88)),
+    rgba(8, 10, 14, 0.85);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(10px) saturate(1.12);
+  z-index: 4;
+  pointer-events: auto;
+}
+
+.gesture-settings__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.gesture-settings__header strong,
+.gesture-settings__header span {
+  display: block;
+}
+
+.gesture-settings__header strong {
+  color: #eef3fb;
+  font-size: 13px;
+}
+
+.gesture-settings__header span {
+  margin-top: 3px;
+  color: #8c98ab;
+  font-size: 11px;
+}
+
+.gesture-settings__reset {
+  flex: 0 0 auto;
+}
+
+.gesture-settings__grid {
+  display: grid;
+  gap: 10px;
+}
+
+.gesture-slider {
+  display: grid;
+  gap: 6px;
+}
+
+.gesture-slider__label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #b2bdd0;
+  font-size: 12px;
+}
+
+.gesture-slider__label b {
+  color: #f3f7fc;
+  font-size: 12px;
+}
+
+.gesture-slider input[type="range"] {
+  width: 100%;
+  margin: 0;
+  accent-color: #7aa7ff;
 }
 
 @media (max-width: 760px) {
@@ -329,6 +405,7 @@
 
   .gesture-window__body {
     padding: 10px;
+    gap: 8px;
   }
 
   .gesture-window__body p {
@@ -343,5 +420,12 @@
     bottom: 10px;
     left: 10px;
     flex-wrap: wrap;
+  }
+
+  .gesture-settings {
+    top: 10px;
+    right: 10px;
+    left: 10px;
+    width: auto;
   }
 }

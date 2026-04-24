@@ -7,6 +7,7 @@ const HAND_COLORS = ['#7aa7ff', '#ffb86b'] // hand #1 / hand #2
 export default function TrackingView({
   stream,
   trackers,
+  gestureSettings,
   showHands,
   showCursor,
   onInteractions,
@@ -21,11 +22,13 @@ export default function TrackingView({
   // Keep latest props without restarting the render loop.
   const showHandsRef = useRef(showHands)
   const showCursorRef = useRef(showCursor)
+  const gestureSettingsRef = useRef(gestureSettings)
   const onStatsRef = useRef(onStats)
   const onInteractionsRef = useRef(onInteractions)
   const interactionsRef = useRef(createHandInteractionState())
   showHandsRef.current = showHands
   showCursorRef.current = showCursor
+  gestureSettingsRef.current = gestureSettings
   onStatsRef.current = onStats
   onInteractionsRef.current = onInteractions
 
@@ -75,7 +78,7 @@ export default function TrackingView({
         })
       }
 
-      const interactions = updateHandInteractions(interactionsRef.current, hands)
+      const interactions = updateHandInteractions(interactionsRef.current, hands, gestureSettingsRef.current)
       const stageInteractions = mapInteractionsToElement(interactions, canvas)
       onInteractionsRef.current?.(stageInteractions)
 
@@ -125,8 +128,8 @@ function drawVirtualCursor(ctx, cursor, w, h, color, label) {
   // The canvas is mirrored in CSS, so draw the inverse X to display natural screen coordinates.
   const x = (1 - cursor.x) * w
   const y = cursor.y * h
-  const outer = cursor.pinching ? 28 : 22
-  const inner = cursor.pinching ? 9 : 5
+  const outer = cursor.pinching ? 30 : 22
+  const inner = cursor.pinching ? 10 : 5
 
   ctx.save()
   ctx.shadowColor = color
@@ -145,7 +148,7 @@ function drawVirtualCursor(ctx, cursor, w, h, color, label) {
 
   if (cursor.pinching) {
     ctx.fillStyle = color
-    ctx.globalAlpha = 0.18
+    ctx.globalAlpha = 0.22
     ctx.beginPath()
     ctx.arc(x, y, outer + 12, 0, Math.PI * 2)
     ctx.fill()
@@ -157,7 +160,8 @@ function drawVirtualCursor(ctx, cursor, w, h, color, label) {
   ctx.font = '700 13px system-ui, sans-serif'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  ctx.fillText(cursor.pinching ? `GRAB ${label}` : String(label), x, y - 46)
+  const stateLabel = cursor.pinching ? `PINCH ${label}` : String(label)
+  ctx.fillText(stateLabel, x, y - 46)
 
   ctx.shadowBlur = 0
   ctx.strokeStyle = 'rgba(255, 255, 255, 0.72)'
@@ -180,6 +184,7 @@ function mapInteractionsToElement(interactions, element) {
   const elementHeight = element.clientHeight
   const sourceWidth = element.width
   const sourceHeight = element.height
+  const rect = element.getBoundingClientRect()
 
   if (!elementWidth || !elementHeight || !sourceWidth || !sourceHeight) return interactions
 
@@ -205,7 +210,9 @@ function mapInteractionsToElement(interactions, element) {
       videoX: interaction.x,
       videoY: interaction.y,
       x: (offsetX + interaction.x * drawnWidth) / elementWidth,
-      y: (offsetY + interaction.y * drawnHeight) / elementHeight
+      y: (offsetY + interaction.y * drawnHeight) / elementHeight,
+      clientX: rect.left + offsetX + interaction.x * drawnWidth,
+      clientY: rect.top + offsetY + interaction.y * drawnHeight
     }
   })
 }
