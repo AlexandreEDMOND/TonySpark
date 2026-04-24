@@ -1,6 +1,11 @@
-const GRAB_RATIO = 0.38
-const RELEASE_RATIO = 0.52
-const GRAB_FRAMES = 2
+const PINCH_GRAB_RATIO = 0.22
+const PINCH_RELEASE_RATIO = 0.25
+const PINCH_FRAMES = 2
+
+export const DEFAULT_GESTURE_SETTINGS = Object.freeze({
+  pinchGrabRatio: PINCH_GRAB_RATIO,
+  pinchReleaseRatio: PINCH_RELEASE_RATIO
+})
 
 export function createHandInteractionState(count = 2) {
   return Array.from({ length: count }, () => ({
@@ -14,9 +19,9 @@ export function createHandInteractionState(count = 2) {
   }))
 }
 
-export function updateHandInteractions(states, hands) {
+export function updateHandInteractions(states, hands, settings = DEFAULT_GESTURE_SETTINGS) {
   states.forEach((state, idx) => {
-    updateHandInteraction(state, hands[idx], idx)
+    updateHandInteraction(state, hands[idx], settings)
   })
   return states.map((state, idx) => ({
     handIndex: idx,
@@ -24,16 +29,16 @@ export function updateHandInteractions(states, hands) {
     y: state.y,
     visible: state.visible,
     pinching: state.pinching,
-    grabStarted: state.grabStarted,
-    grabEnded: state.grabEnded,
+    pinchStarted: state.pinchStarted,
+    pinchEnded: state.pinchEnded,
     pinchRatio: state.pinchRatio
   }))
 }
 
-function updateHandInteraction(state, landmarks) {
+function updateHandInteraction(state, landmarks, settings) {
   const wasPinching = state.pinching
-  state.grabStarted = false
-  state.grabEnded = false
+  state.pinchStarted = false
+  state.pinchEnded = false
 
   const indexTip = landmarks?.[8]
   if (!indexTip) {
@@ -41,7 +46,7 @@ function updateHandInteraction(state, landmarks) {
     state.pinching = false
     state.pinchFrames = 0
     state.pinchRatio = null
-    state.grabEnded = wasPinching
+    state.pinchEnded = wasPinching
     return
   }
 
@@ -53,35 +58,37 @@ function updateHandInteraction(state, landmarks) {
   state.visible = true
   state.initialized = true
 
-  const ratio = getPinchRatio(landmarks)
-  state.pinchRatio = ratio
+  const pinchRatio = getPinchRatio(landmarks)
+  state.pinchRatio = pinchRatio
 
-  if (ratio == null) {
+  if (pinchRatio == null) {
     state.pinching = false
     state.pinchFrames = 0
-    state.grabEnded = wasPinching
-    return
-  }
+    state.pinchEnded = wasPinching
+  } else {
+    const wantsPinch = state.pinching
+      ? pinchRatio < settings.pinchReleaseRatio
+      : pinchRatio < settings.pinchGrabRatio
 
-  const wantsPinch = state.pinching ? ratio < RELEASE_RATIO : ratio < GRAB_RATIO
-
-  if (!state.pinching && wantsPinch) {
-    state.pinchFrames += 1
-    if (state.pinchFrames >= GRAB_FRAMES) {
-      state.pinching = true
-      state.grabStarted = true
+    if (!state.pinching && wantsPinch) {
+      state.pinchFrames += 1
+      if (state.pinchFrames >= PINCH_FRAMES) {
+        state.pinching = true
+        state.pinchStarted = true
+      }
+    } else if (state.pinching && !wantsPinch) {
+      state.pinching = false
+      state.pinchFrames = 0
+      state.pinchEnded = true
+    } else if (!wantsPinch) {
+      state.pinchFrames = 0
     }
-    return
   }
+}
 
-  if (state.pinching && !wantsPinch) {
-    state.pinching = false
-    state.pinchFrames = 0
-    state.grabEnded = true
-    return
-  }
-
-  if (!wantsPinch) state.pinchFrames = 0
+function distance(a, b) {
+  const dz = (a.z ?? 0) - (b.z ?? 0)
+  return Math.hypot(a.x - b.x, a.y - b.y, dz)
 }
 
 export function getPinchRatio(landmarks) {
@@ -95,11 +102,6 @@ export function getPinchRatio(landmarks) {
   if (palmSize < 0.01) return null
 
   return distance(thumbTip, indexTip) / palmSize
-}
-
-function distance(a, b) {
-  const dz = (a.z ?? 0) - (b.z ?? 0)
-  return Math.hypot(a.x - b.x, a.y - b.y, dz)
 }
 
 function clamp01(value) {

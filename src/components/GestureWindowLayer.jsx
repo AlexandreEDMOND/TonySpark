@@ -50,8 +50,14 @@ export default function GestureWindowLayer({
           ↺
         </button>
         {gestures.map((gesture) => (
-          <div key={gesture.handIndex} className={gesture.pinching ? 'gesture-chip is-pinching' : 'gesture-chip'}>
-            <span>Main {gesture.handIndex + 1}</span>
+          <div
+            key={gesture.handIndex}
+            className={[
+              'gesture-chip',
+              gesture.pinching ? 'is-pinching' : ''
+            ].filter(Boolean).join(' ')}
+          >
+            <span>Main {gesture.handIndex + 1} · {formatInteractionState(gesture.interactionState)}</span>
             <b>{formatGesture(gesture)}</b>
           </div>
         ))}
@@ -61,8 +67,27 @@ export default function GestureWindowLayer({
 }
 
 function formatGesture(gesture) {
-  if (!gesture.visible) return 'absente'
-  if (gesture.pinchRatio == null) return 'vise'
-  const ratio = gesture.pinchRatio.toFixed(2)
-  return gesture.pinching ? `grab ${ratio}` : `vise ${ratio}`
+  if (!gesture.visible) return 'aucun signal'
+
+  if (gesture.interactionState === 'RESIZING' || gesture.interactionState === 'DRAGGING') {
+    return gesture.pinchRatio != null ? `pinch ${gesture.pinchRatio.toFixed(2)}` : 'pinch'
+  }
+
+  if (gesture.pinchRatio != null) return `pinch ${gesture.pinchRatio.toFixed(2)}`
+  return 'suivi'
+}
+
+function formatInteractionState(state) {
+  switch (state) {
+    case 'POINTING':
+      return 'vise'
+    case 'HOVER':
+      return 'survol'
+    case 'DRAGGING':
+      return 'drag'
+    case 'RESIZING':
+      return 'resize'
+    default:
+      return 'idle'
+  }
 }

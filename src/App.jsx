@@ -1,17 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import CameraSelector from './components/CameraSelector.jsx'
+import GestureSettingsPanel from './components/GestureSettingsPanel.jsx'
 import GestureWindowLayer from './components/GestureWindowLayer.jsx'
 import TrackingView from './components/TrackingView.jsx'
 import { createTrackers } from './lib/tracker.js'
+import { DEFAULT_GESTURE_SETTINGS } from './lib/gestures.js'
+import { createInteractionMachine, stepInteractionMachine } from './lib/interactionMachine.js'
 import './App.css'
 
 const INITIAL_WINDOWS = [
   {
     id: 'console',
     title: 'Console cible',
-    body: 'Pince pouce-index sur cette barre, garde le geste fermé, puis déplace ta main.',
-    tag: 'Grab zone',
-    status: 'prêt',
+    body: "Utilise le pinch pouce-index pour saisir cette fenêtre, la déplacer puis la relâcher avec inertie.",
+    tag: 'Pinch drag',
+    status: 'glisser',
     x: 0.08,
     y: 0.12,
     w: 0.28,
@@ -22,9 +25,9 @@ const INITIAL_WINDOWS = [
   {
     id: 'notes',
     title: 'Notes',
-    body: 'La fenêtre capturée reste sous le curseur tant que le pincement est actif.',
-    tag: 'Pinch',
-    status: 'stable',
+    body: "Deux mains en pinch sur la même fenêtre lancent le resize. Une seule main en pinch sert au déplacement.",
+    tag: 'Pinch resize',
+    status: 'deux mains',
     x: 0.58,
     y: 0.16,
     w: 0.3,
@@ -35,9 +38,9 @@ const INITIAL_WINDOWS = [
   {
     id: 'palette',
     title: 'Palette',
-    body: 'Le seuil utilise la taille de la paume pour rester exploitable près ou loin de la caméra.',
-    tag: 'Ratio',
-    status: '0.38 / 0.52',
+    body: "Le panneau en haut à droite ne règle plus que les seuils de pinch pour stabiliser drag et resize.",
+    tag: 'Tuning',
+    status: 'pinch only',
     x: 0.32,
     y: 0.56,
     w: 0.34,
@@ -66,6 +69,7 @@ export default function App() {
   const [stats, setStats] = useState({ hands: 0, fps: 0, cursors: [] })
   const [showHands, setShowHands] = useState(true)
   const [showCursor, setShowCursor] = useState(true)
+  const [gestureSettings, setGestureSettings] = useState(DEFAULT_GESTURE_SETTINGS)
   const [windows, setWindows] = useState(INITIAL_WINDOWS)
   const [gestureUi, setGestureUi] = useState({
     activeWindowIds: [],
@@ -75,8 +79,7 @@ export default function App() {
   })
   const trackersRef = useRef(null)
   const windowsRef = useRef(INITIAL_WINDOWS)
-  const grabsRef = useRef({})
-  const resizeRef = useRef(null)
+  const interactionMachineRef = useRef(createInteractionMachine())
   const inertiaRef = useRef({})
   const gestureUiTickRef = useRef(0)
 
@@ -238,10 +241,17 @@ export default function App() {
 
   useEffect(() => () => stopAllWindowInertia(), [stopAllWindowInertia])
 
+  const handleGestureSettingChange = useCallback((key, value) => {
+    setGestureSettings((current) => normalizeGestureSettings({ ...current, [key]: value }, key))
+  }, [])
+
+  const resetGestureSettings = useCallback(() => {
+    setGestureSettings(DEFAULT_GESTURE_SETTINGS)
+  }, [])
+
   const resetWindows = useCallback(() => {
     stopAllWindowInertia()
-    grabsRef.current = {}
-    resizeRef.current = null
+    interactionMachineRef.current = createInteractionMachine()
     windowsRef.current = INITIAL_WINDOWS
     setWindows(INITIAL_WINDOWS)
     setGestureUi((current) => ({
@@ -254,106 +264,40 @@ export default function App() {
 
   const handleInteractions = useCallback((gestures) => {
     const frameTime = performance.now()
-    const gesturesByHand = new Map(gestures.map((gesture) => [gesture.handIndex, gesture]))
-    let nextWindows = windowsRef.current
-    let windowsChanged = false
-    let hoverWindowId = null
-
-    const setNextWindows = (updater) => {
-      nextWindows = updater(nextWindows)
-      windowsChanged = true
-    }
-
-    for (const handIndex of Object.keys(grabsRef.current)) {
-      const grab = grabsRef.current[handIndex]
-      const gesture = gesturesByHand.get(Number(handIndex))
-      if (!gesture?.visible || gesture.grabEnded || !gesture.pinching) {
-        const wasResizingGrab = (
-          resizeRef.current?.windowId === grab.windowId &&
-          resizeRef.current.handIndexes.includes(grab.handIndex)
-        )
-        if (gesture?.grabEnded && !wasResizingGrab) {
-          launchWindowInertia(grab.windowId, {
-            vx: grab.vx ?? 0,
-            vy: grab.vy ?? 0
-          })
-        }
-        delete grabsRef.current[handIndex]
-        resizeRef.current = null
+    const currentWindows = windowsRef.current
+    const nextInteraction = stepInteractionMachine({
+      machine: interactionMachineRef.current,
+      gestures,
+      windows: currentWindows,
+      frameTime,
+      options: {
+        stageMargin: STAGE_MARGIN,
+        minWindowW: MIN_WINDOW_W,
+        minWindowH: MIN_WINDOW_H,
+        maxWindowW: MAX_WINDOW_W,
+        maxWindowH: MAX_WINDOW_H
+      },
+      api: {
+        findTopWindowAt,
+        bringWindowToFront,
+        stopWindowInertia,
+        launchWindowInertia
       }
-    }
+    })
 
-    for (const gesture of gestures) {
-      if (!gesture.visible) continue
-
-      const hovered = findTopWindowAt(nextWindows, gesture.x, gesture.y)
-      if (!hoverWindowId && hovered) hoverWindowId = hovered.id
-
-      if (!grabsRef.current[gesture.handIndex] && gesture.grabStarted && hovered) {
-        stopWindowInertia(hovered.id)
-        grabsRef.current[gesture.handIndex] = {
-          handIndex: gesture.handIndex,
-          windowId: hovered.id,
-          offsetX: gesture.x - hovered.x,
-          offsetY: gesture.y - hovered.y,
-          lastX: hovered.x,
-          lastY: hovered.y,
-          lastTime: frameTime,
-          vx: 0,
-          vy: 0
-        }
-        setNextWindows((current) => bringWindowToFront(current, hovered.id))
-      }
-    }
-
-    const grabsByWindow = groupActiveGrabsByWindow(grabsRef.current, gesturesByHand)
-    const resizeGroup = Object.entries(grabsByWindow).find(([, grabs]) => grabs.length >= 2)
-
-    if (resizeGroup) {
-      const [windowId, grabs] = resizeGroup
-      const handIndexes = grabs.slice(0, 2).map((grab) => grab.handIndex).sort()
-      const currentGestures = handIndexes.map((handIndex) => gesturesByHand.get(handIndex))
-      const currentWindow = nextWindows.find((window) => window.id === windowId)
-
-      if (currentWindow && currentGestures.every(Boolean)) {
-        if (!isSameResize(resizeRef.current, windowId, handIndexes)) {
-          resizeRef.current = createResizeSession(windowId, handIndexes, currentGestures, currentWindow)
-        }
-        setNextWindows((current) => resizeWindowWithGestures(current, resizeRef.current, currentGestures))
-      }
-    } else {
-      resizeRef.current = null
-    }
-
-    if (!resizeRef.current) {
-      for (const grab of Object.values(grabsRef.current)) {
-        const gesture = gesturesByHand.get(grab.handIndex)
-        if (!gesture?.visible || !gesture.pinching) continue
-        setNextWindows((current) => moveWindowWithGesture(current, grab, gesture, frameTime))
-      }
-    } else {
-      const resizingHands = new Set(resizeRef.current.handIndexes)
-      for (const grab of Object.values(grabsRef.current)) {
-        if (resizingHands.has(grab.handIndex)) continue
-        const gesture = gesturesByHand.get(grab.handIndex)
-        if (!gesture?.visible || !gesture.pinching) continue
-        setNextWindows((current) => moveWindowWithGesture(current, grab, gesture, frameTime))
-      }
-    }
-
-    if (windowsChanged) {
-      windowsRef.current = nextWindows
-      setWindows(nextWindows)
+    if (nextInteraction.windows !== currentWindows) {
+      windowsRef.current = nextInteraction.windows
+      setWindows(nextInteraction.windows)
     }
 
     const now = performance.now()
     if (now - gestureUiTickRef.current > 70) {
       gestureUiTickRef.current = now
       setGestureUi({
-        activeWindowIds: [...new Set(Object.values(grabsRef.current).map((grab) => grab.windowId))],
-        resizingWindowId: resizeRef.current?.windowId ?? null,
-        hoverWindowId,
-        gestures
+        activeWindowIds: nextInteraction.activeWindowIds,
+        resizingWindowId: nextInteraction.resizingWindowId,
+        hoverWindowId: nextInteraction.hoverWindowId,
+        gestures: nextInteraction.gestures
       })
     }
   }, [launchWindowInertia, stopWindowInertia])
@@ -412,6 +356,7 @@ export default function App() {
             <TrackingView
               stream={stream}
               trackers={trackersRef.current}
+              gestureSettings={gestureSettings}
               showHands={showHands}
               showCursor={showCursor}
               onInteractions={handleInteractions}
@@ -424,6 +369,11 @@ export default function App() {
               hoverWindowId={gestureUi.hoverWindowId}
               gestures={gestureUi.gestures}
               onReset={resetWindows}
+            />
+            <GestureSettingsPanel
+              settings={gestureSettings}
+              onChange={handleGestureSettingChange}
+              onReset={resetGestureSettings}
             />
           </>
         )}
@@ -438,7 +388,7 @@ export default function App() {
 
 function formatCursor(cursor) {
   if (!cursor) return '—'
-  const mode = cursor.pinching ? ' grab' : ''
+  const mode = cursor.pinching ? ' pinch' : ''
   return `${Math.round(cursor.x * 100)}%, ${Math.round(cursor.y * 100)}%${mode}`
 }
 
@@ -460,90 +410,6 @@ function bringWindowToFront(windows, windowId) {
   ))
 }
 
-function groupActiveGrabsByWindow(grabs, gesturesByHand) {
-  return Object.values(grabs).reduce((groups, grab) => {
-    const gesture = gesturesByHand.get(grab.handIndex)
-    if (!gesture?.visible || !gesture.pinching) return groups
-    groups[grab.windowId] ??= []
-    groups[grab.windowId].push(grab)
-    return groups
-  }, {})
-}
-
-function moveWindowWithGesture(windows, activeGrab, gesture, frameTime) {
-  return windows.map((window) => {
-    if (window.id !== activeGrab.windowId) return window
-    const { x, y } = clampWindowPosition(
-      window,
-      gesture.x - activeGrab.offsetX,
-      gesture.y - activeGrab.offsetY
-    )
-    updateGrabVelocity(activeGrab, x, y, frameTime)
-    return {
-      ...window,
-      x,
-      y
-    }
-  })
-}
-
-function updateGrabVelocity(activeGrab, x, y, frameTime) {
-  const dt = Math.max((frameTime - activeGrab.lastTime) / 1000, 0)
-  if (dt > 0) {
-    const nextVx = (x - activeGrab.lastX) / dt
-    const nextVy = (y - activeGrab.lastY) / dt
-    activeGrab.vx = activeGrab.vx * 0.35 + nextVx * 0.65
-    activeGrab.vy = activeGrab.vy * 0.35 + nextVy * 0.65
-  }
-
-  activeGrab.lastX = x
-  activeGrab.lastY = y
-  activeGrab.lastTime = frameTime
-}
-
-function createResizeSession(windowId, handIndexes, gestures, window) {
-  const center = midpoint(gestures[0], gestures[1])
-  const distance = Math.max(distanceBetween(gestures[0], gestures[1]), 0.01)
-
-  return {
-    windowId,
-    handIndexes,
-    startDistance: distance,
-    startCenter: center,
-    startWindow: {
-      x: window.x,
-      y: window.y,
-      w: window.w,
-      h: window.h
-    }
-  }
-}
-
-function resizeWindowWithGestures(windows, resize, gestures) {
-  if (!resize) return windows
-
-  const center = midpoint(gestures[0], gestures[1])
-  const distance = Math.max(distanceBetween(gestures[0], gestures[1]), 0.01)
-  const scale = clamp(distance / resize.startDistance, 0.55, 2.25)
-  const nextW = clamp(resize.startWindow.w * scale, MIN_WINDOW_W, MAX_WINDOW_W)
-  const nextH = clamp(resize.startWindow.h * scale, MIN_WINDOW_H, MAX_WINDOW_H)
-  const appliedScaleX = nextW / resize.startWindow.w
-  const appliedScaleY = nextH / resize.startWindow.h
-  const topLeftOffsetX = resize.startWindow.x - resize.startCenter.x
-  const topLeftOffsetY = resize.startWindow.y - resize.startCenter.y
-
-  return windows.map((window) => {
-    if (window.id !== resize.windowId) return window
-    return {
-      ...window,
-      w: nextW,
-      h: nextH,
-      x: clamp(center.x + topLeftOffsetX * appliedScaleX, STAGE_MARGIN, 1 - STAGE_MARGIN - nextW),
-      y: clamp(center.y + topLeftOffsetY * appliedScaleY, STAGE_MARGIN, 1 - STAGE_MARGIN - nextH)
-    }
-  })
-}
-
 function clampWindowPosition(window, x, y) {
   return {
     x: clamp(x, STAGE_MARGIN, 1 - STAGE_MARGIN - window.w),
@@ -551,26 +417,23 @@ function clampWindowPosition(window, x, y) {
   }
 }
 
-function isSameResize(resize, windowId, handIndexes) {
-  return Boolean(
-    resize &&
-    resize.windowId === windowId &&
-    resize.handIndexes.length === handIndexes.length &&
-    resize.handIndexes.every((handIndex, idx) => handIndex === handIndexes[idx])
-  )
-}
-
-function midpoint(a, b) {
-  return {
-    x: (a.x + b.x) / 2,
-    y: (a.y + b.y) / 2
-  }
-}
-
-function distanceBetween(a, b) {
-  return Math.hypot(a.x - b.x, a.y - b.y)
-}
-
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value))
+}
+
+function normalizeGestureSettings(settings, changedKey) {
+  const next = {
+    pinchGrabRatio: clamp(settings.pinchGrabRatio, 0.12, 0.6),
+    pinchReleaseRatio: clamp(settings.pinchReleaseRatio, 0.16, 0.8)
+  }
+
+  if (next.pinchGrabRatio >= next.pinchReleaseRatio) {
+    if (changedKey === 'pinchReleaseRatio') {
+      next.pinchGrabRatio = clamp(next.pinchReleaseRatio - 0.02, 0.12, 0.6)
+    } else {
+      next.pinchReleaseRatio = clamp(next.pinchGrabRatio + 0.02, 0.16, 0.8)
+    }
+  }
+
+  return next
 }
